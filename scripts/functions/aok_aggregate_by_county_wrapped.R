@@ -38,7 +38,7 @@ aggregate_aok_by_county<- function(clean_aok_data,aok_previous, current_month){
   #ALL NA'S should be fixed - Renk forgot to map Moldooch so we will cut it
   d.f<-d.f %>% filter(is.na(D.info_settlement_other))
 
-  new_columns_added_from_last_round<-colnames(d.f)[colnames(d.f) %in% colnames(aok_previous) ==FALSE]
+  new_columns_added_from_last_round <-colnames(d.f)[colnames(d.f) %in% colnames(aok_previous) ==FALSE]
 
   ## Let's remove columns we don't need. Notes first, no data in those!!
   d.f <- select(d.f, everything(), -contains("note"), - contains("_other"))

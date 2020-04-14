@@ -9,13 +9,13 @@ library(purrr)
 library(fs)
 library(tidyverse)
 library(stringr)
-library(plyr)
+
 
 
 month_of_assessment<-"2020-02-01"
 admin_gdb <- "inputs/gis_data/boundaries"
 logs_dir <- "inputs/2020_02/cleaning_logs"
-settlement_data <- "outputs/AoK_mastersettlementlist_Feb2020.csv"
+latest_settlement_data <- "inputs/2020_02/SSD_Settlements_V38.csv"
 raw_data <- "inputs/2020_02/AoK_Feb2020.csv"
 tableau_filter <-"Tableau/Table_data/2020_02/SSD_Filter.csv"
 
@@ -29,15 +29,30 @@ source("scripts/functions/aok_aggregate_by_county_wrapped.R")
 #Load data ------------------------------
 
 # LOAD AOK RAW DATA
-aok_raw_raw<-read.csv(raw_data, stringsAsFactors = F,na.strings = c("n/a","", ""))
-aok_raw <-read.csv("outputs/REACH_SSD_AoKclean3.csv", stringsAsFactors = F,na.strings = c("n/a","", ""))
-aok_raw$M.education_level.primary_one_five <- as.numeric(aok_raw$M.education_level.primary_one_five)
+raw_aok <-butteR::read_all_csvs_in_folder(input_csv_folder = "inputs/2020_02/raw_data")
+raw_aok <-bind_rows(raw_aok)
+
+
+aok_raw <- raw_aok
+
+
+#aok_raw <-read.csv(raw_data, stringsAsFactors = F,na.strings = c("n/a","", ""))
+
+#making sure all our uuid in the dataset are unique
+
+aok_raw <- distinct(aok_raw,X_uuid, .keep_all= TRUE)
+
+##aok_clean <-read.csv("outputs/REACH_SSD_AoKclean3.csv", stringsAsFactors = F,na.strings = c("n/a","", ""))
 
 #Add latest settlement data and and then create its shapefile version of wgs84 projection
-master_settlement<-read.csv(settlement_data, stringsAsFactors = FALSE)
+master_settlement<-read.csv(latest_settlement_data, stringsAsFactors = FALSE)
+master_settlement <- distinct(master_settlement,NAMECOUNTY, .keep_all= TRUE)
 
 colnames(master_settlement)<-paste0("mast.",colnames(master_settlement))
 master_settlement_sf<- st_as_sf(master_settlement,coords=c("mast.X","mast.Y"), crs=4326)
+
+
+
 
 
 #add in the csv cleaning logs and add base name for feedback purposes
@@ -46,7 +61,10 @@ cleaning_logz <- fs::dir_ls(logs_dir,regexp = "\\.csv$")
 cleaning_logz  %>% map_dfr(cleaning_logz)
 cleaning_log <-cleaning_logz %>% map_dfr(read_csv,.id = "source")
 cleaning_log <- cleaning_log %>% mutate(source = str_remove_all(source, "inputs/2020_02/cleaning_logs/REACH_SSD_AoK_")) %>%
-                mutate(source = str_remove_all(source, "_Cleaning_Log_Feb2020.csv")) %>% rename("A.base"=source)
+                mutate(source = str_remove_all(source, "_Cleaning_Log_Feb2020.csv"))
+
+
+names(cleaning_log)[names(cleaning_log) == "source"] <- "A.base"
 
 
 #Most prevalent error types per base
@@ -106,27 +124,37 @@ aok_raw <- butteR::implement_cleaning_log(df = aok_raw,
                                 cl_new_val = "new_value")
 
 
-#making sure all our uuid in the dataset are unique
 
-aok_raw <- distinct(aok_raw,X_uuid, .keep_all= TRUE)
 #Making sure no duplicates in settlement list
 
-master_settlement <- distinct(master_settlement,mast.NAMECOUNTY, .keep_all= TRUE)
+
 
 
 #Check settlement match------
 
 aok_raw <- aok_raw %>% mutate(mast.NAMECOUNTY = paste0(D.info_settlement, D.info_county))
+aok_raw <- aok_raw %>% filter(!is.na(D.info_county))
 aok_raw <- left_join(aok_raw, master_settlement, by = "mast.NAMECOUNTY")
 
 
+aok_raw_summarise <- aok_raw %>%  group_by(D.info_county,mast.NAMECOUNTY) %>% summarise(total_count = n())
+
 unmatched_records <-aok_raw %>% filter(is.na(mast.COUNTYJOIN)) %>% select(X_uuid,D.info_state,D.info_county,D.info_settlement,D.info_settlement_other,D.info_settlement_final,mast.NAMECOUNTY)
-print(unmatched_records$mast.NAMECOUNTY)
+
+
+
+aok_raw$mast.NAMECOUNTY <- trim(aok_raw$mast.NAMECOUNTY)
 
 
 
 
-#Dropped surveys
+
+
+
+
+
+
+#KI level clean data
 write.csv(
   aok_raw,
   file = "outputs/AOK_clean_data_20200201.csv",
@@ -194,13 +222,15 @@ aok_clean1<-aok_raw
 # aok_clean1[aok_clean1$X_uuid=="b4d97108-3f34-415d-9346-f22d2aa719ea","D.info_settlement_other"]<-NA
 # aok_clean1[aok_clean1$X_uuid=="b4d97108-3f34-415d-9346-f22d2aa719ea","D.info_settlement"]<-"Bajur"
 
+names(new_sett_sf)[names(new_sett_sf) == "ï..uuid"] <- "X_uuid"
 
-remove_from_new_sett<-aok_clean1 %>%
-  filter(X_uuid %in% new_sett_sf$uuid  & is.na(D.info_settlement_other))%>%
-  select(X_uuid,D.info_settlement) %>% pull(X_uuid)
+mapped_other <- left_join(new_sett_sf ,aok_clean1, by = "X_uuid")
+remove_from_new_sett <- mapped_other %>% filter(is.na(D.info_settlement))  %>% pull(X_uuid)
 
-new_sett_sf<- new_sett_sf %>% filter(!ï..uuid %in% remove_from_new_sett)
 
+
+
+new_sett_sf<- new_sett_sf %>% filter(!X_uuid %in% remove_from_new_sett)
 
 # NEW SETTLEMENT DATA WHICH MATCHES MASTER SETTLEMENTS EXACTLY ------------
 
@@ -343,6 +373,8 @@ aok_clean3 <-aok_raw
 
 aok_clean3<- aok_clean3 %>% filter(!is.na(mast.COUNTYJOIN)) %>% select(start:X_validation_status)
 
+
+
 #convert all the multuple select rows as numeric
 #column headers of multiple select columns
 
@@ -368,6 +400,13 @@ prev_round<-read.csv("inputs/2020_02/REACH_SSD_AoK_LongTermSettlementData.csv", 
 
 
 aok_clean_by_county<-aggregate_aok_by_county(clean_aok_data = aok_clean3,aok_previous = prev_round, current_month = "2020-02-01")
+
+
+names(aok_raw)[names(aok_raw) == "mast.NAMECOUNTY"] <- "D.settlecounty"
+
+matc_data <- inner_join(aok_clean_by_county,master_settlement, by = "D.settlecounty" )
+
+
 
 
 aok_clean_by_county[aok_clean_by_county=="NA"]<- "blanked"
@@ -412,7 +451,7 @@ write.csv(
 filter_file <-read.csv(tableau_filter, stringsAsFactors = FALSE)
 
 settlement_count <- as.data.frame(table(master_settlement$mast.COUNTYJOIN))
-asssessed_count <- as.data.frame(table(aok_clean3$D.info_county))
+asssessed_count <- as.data.frame(table(aok_clean_by_county$D.info_county))
 filter_current_month <- left_join(settlement_count,asssessed_count, by = "Var1")
 
 colnames(filter_current_month) <- c("county_join", "settlement_count", "assessment_count")
@@ -420,12 +459,23 @@ filter_current_month[is.na(filter_current_month)] <- 0
 filter_current_month$month <- month_of_assessment
 filtercolumns_added <- filter_file %>%  select(county_join,county_label,state_join,state_label,month) %>% group_by(county_join,county_label,state_join,state_label) %>% summarise_all(funs(sum(!is.na(.))))
 filter_ <- left_join(filtercolumns_added,filter_current_month, by = "county_join")
-filter_ <- filter_ %>%  select(month.y,"county_join", "county_label", "state_join", "state_label","settlement_count", "assessment_count")
+filter_ <- filter_ %>%  select(month.y,"county_join", "county_label", "state_join", "state_label","settlement_count", "assessment_count") %>%
+  arrange(state_join,county_join)
 names(filter_)[names(filter_) == "month.y"] <- "month"
+
+
+
+
 
 updated_filter <- bind_rows(filter_,filter_file) %>% select(month:assessment_count)
 
-
+#filter dataset
+write.csv(
+  updated_filter,
+  file = "Tableau/Table_data/2020_02/SSD_Filter.csv",
+  na = "NA",
+  row.names = FALSE
+)
 
 #Settlement data to be used
 
@@ -437,10 +487,13 @@ setttlement_tableau <-  master_settlement_sf %>%
 
 setttlement_tableau <- sf::st_as_sf(setttlement_tableau, coords=geometry, crs= 4326)
 
-setttlement_tableau <- st_transform(master_settlement_sf, 32636)
+setttlement_tableau <- st_transform(setttlement_tableau, 32636)
+
+
 
 sf::st_write(setttlement_tableau,"Tableau/Spatial_data/SSD_Settlements.shp", update=TRUE, driver = "ESRI Shapefile")
 
+sf::st_write (setttlement_tableau,"Tableau/Spatial_data/SSD_Settlements.shp", over)
 
 
 ## Hexagonal Aggregation -------------------------------
