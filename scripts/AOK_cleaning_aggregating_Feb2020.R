@@ -73,6 +73,9 @@ logs_base <- cleaning_log %>% select(A.base,Sectors,indicator) %>% filter(cleani
             mutate(rank = dense_rank(desc(total_count))) %>% arrange(A.base,Sectors, rank,indicator)
 
 
+cleaning_log <- cleaning_log %>%
+  filter(!str_detect(indicator,"settlement"))
+
 
 #we had 2 sets of uuid columns. i.e. different variations was used in saving the uuid
 
@@ -106,7 +109,7 @@ write.csv(
 # Reflect cleaning log------
 
 
-butteR::check_cleaning_log(df = aok_raw,
+cleaning_check <- butteR::check_cleaning_log(df = aok_raw,
                             df_uuid = "X_uuid",
                             cl = cleaning_log,
                             cl_change_type_col ="change_type",
@@ -115,7 +118,7 @@ butteR::check_cleaning_log(df = aok_raw,
                             cl_new_val = "new_value")
 
 
-aok_raw <- butteR::implement_cleaning_log(df = aok_raw,
+aok_clean <- butteR::implement_cleaning_log(df = aok_raw,
                                 df_uuid = "X_uuid",
                                 cl = cleaning_log,
                                 cl_change_type_col ="change_type",
@@ -132,20 +135,14 @@ aok_raw <- butteR::implement_cleaning_log(df = aok_raw,
 
 #Check settlement match------
 
-aok_raw <- aok_raw %>% mutate(mast.NAMECOUNTY = paste0(D.info_settlement, D.info_county))
-aok_raw <- aok_raw %>% filter(!is.na(D.info_county))
-aok_raw <- left_join(aok_raw, master_settlement, by = "mast.NAMECOUNTY")
+#aok_clean <- aok_clean %>% mutate(mast.NAMECOUNTY = paste0(D.info_settlement, D.info_county))
+#aok_clean <- aok_clean %>% filter(!is.na(D.info_county))
+#aok_clean <- left_join(aok_clean, master_settlement, by = "mast.NAMECOUNTY")
 
 
-aok_raw_summarise <- aok_raw %>%  group_by(D.info_county,mast.NAMECOUNTY) %>% summarise(total_count = n())
+#aok_clean_summarise <- aok_clean %>%  group_by(D.info_county,mast.NAMECOUNTY) %>% summarise(total_count = n())
 
-unmatched_records <-aok_raw %>% filter(is.na(mast.COUNTYJOIN)) %>% select(X_uuid,D.info_state,D.info_county,D.info_settlement,D.info_settlement_other,D.info_settlement_final,mast.NAMECOUNTY)
-
-
-
-aok_raw$mast.NAMECOUNTY <- trim(aok_raw$mast.NAMECOUNTY)
-
-
+#unmatched_records <-aok_clean %>% filter(is.na(mast.COUNTYJOIN)) %>% select(X_uuid,D.info_state,D.info_county,D.info_settlement,D.info_settlement_other,D.info_settlement_final,mast.NAMECOUNTY)
 
 
 
@@ -217,31 +214,31 @@ master_settlement_sf<-master_settlement_sf %>%
 
 # CHECK IF NEW SETTLEMENTS HAVE BEEN FIXED IN CL --------------------------
 
-aok_clean1<-aok_raw
+aok_clean1<-aok_clean
 
 # aok_clean1[aok_clean1$X_uuid=="b4d97108-3f34-415d-9346-f22d2aa719ea","D.info_settlement_other"]<-NA
 # aok_clean1[aok_clean1$X_uuid=="b4d97108-3f34-415d-9346-f22d2aa719ea","D.info_settlement"]<-"Bajur"
 
+#names(new_sett_sf)[names(new_sett_sf) == "ï..uuid"] <- "X_uuid"
+
+#mapped_other <- left_join(new_sett_sf ,aok_clean1, by = "X_uuid")
+#remove_from_new_sett <- mapped_other %>% filter(is.na(D.info_settlement))  %>% pull(X_uuid)
+
+
+#new_sett_sf<- new_sett_sf %>% filter(!X_uuid %in% remove_from_new_sett)
+
 names(new_sett_sf)[names(new_sett_sf) == "ï..uuid"] <- "X_uuid"
-
-mapped_other <- left_join(new_sett_sf ,aok_clean1, by = "X_uuid")
-remove_from_new_sett <- mapped_other %>% filter(is.na(D.info_settlement))  %>% pull(X_uuid)
-
-
-
-
-new_sett_sf<- new_sett_sf %>% filter(!X_uuid %in% remove_from_new_sett)
 
 # NEW SETTLEMENT DATA WHICH MATCHES MASTER SETTLEMENTS EXACTLY ------------
 
 exact_matches1<-new_sett_sf %>%
-  mutate(matched_where= case_when(new.enum_sett_county %in% master_settlement$mast.settlement_county_sanitized~"enum", #CHECK WITH ENUMS INPUT
-                                  new.adm2_sett_county %in% master_settlement$mast.settlement_county_sanitized~"shapefile_only" #CHECK WITH SHAEFILE COUNTY
+  mutate(matched_where= case_when(new.enum_sett_county %in% master_settlement_sf$mast.settlement_county_sanitized~"enum", #CHECK WITH ENUMS INPUT
+                                  new.adm2_sett_county %in% master_settlement_sf$mast.settlement_county_sanitized~"shapefile_only" #CHECK WITH SHAEFILE COUNTY
   )) %>%
   filter(!is.na(matched_where)) #ONLY RETURN EXACT MATCHES
 
 # WRITE EXACT MATCHES TO CLEANING LOG TO THEN IMPLEMENT ON DATA.
-aok_exact_matches_cl<-exact_matches_to_cl(exact_match_data = exact_matches1,user = "Jack")
+aok_exact_matches_cl<-exact_matches_to_cl(exact_match_data = exact_matches1,user = "Jack",uuid_col  = "X_uuid")
 
 #NOW IMPLEMENT THIS CLEANING LOG!
 aok_clean2<-butteR::implement_cleaning_log(df = aok_clean1,
@@ -253,7 +250,7 @@ aok_clean2<-butteR::implement_cleaning_log(df = aok_clean1,
                                            cl_new_val = "new_value")
 
 #EXTRACT NEW SETTLEMENTS WHICH DO NO MATCH
-new_sett_sf_unmatched<- new_sett_sf %>% filter(!uuid %in% exact_matches1$uuid)
+new_sett_sf_unmatched<- new_sett_sf %>% filter(!X_uuid %in% exact_matches1$X_uuid)
 
 #REMOVE MATCHED SETTLEMENTS FROM MASTER
 master_settlement_sf_not_matched<-master_settlement_sf %>%
@@ -267,7 +264,7 @@ new_with_closest_old<-butteR::closest_distance_rtree(new_sett_sf_unmatched %>%
 #CLEAN UP DATASET
 new_with_closest_old_vars<-new_with_closest_old %>%
   mutate(new.D.info_settlement_other= D.info_settlement_other %>% gsub("-","_",.)) %>%
-  select(uuid,
+  select(X_uuid,
          new.A.base=A.base,
          new.county_enum=D.info_county,
          new.county_adm2= adm2,
@@ -292,8 +289,7 @@ settlements_best_guess<-new_with_closest_old_vars %>%
 
 # HOWEVER, TO KEEP EVERYTHING IN THE R ENVIRONMENT- HERE IS AN INTERACTIVE FUNCTION TO MODIFY THE SETTLEMENT BEST GUESS DF IN PLACE
 # OUTUT WILL BE A CLEANING LOG (IF THERE ARE CHANGES TO BE MADE)
-new_settlement_evaluation<-evaluate_unmatched_settlements(user= "jack",new_settlement_table = settlements_best_guess)
-
+new_settlement_evaluation<-evaluate_unmatched_settlements(user= "jack",new_settlement_table = settlements_best_guess, uuid_col = "X_uuid")
 
 new_settlement_evaluation$checked_setlements
 new_settlement_evaluation$cleaning_log

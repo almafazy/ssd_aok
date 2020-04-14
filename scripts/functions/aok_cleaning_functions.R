@@ -1,9 +1,9 @@
-exact_matches_to_cl<-function(exact_match_data,user="Jack"){
+exact_matches_to_cl<-function(exact_match_data,user="Jack",uuid_col){
   if("sf" %in% class(exact_match_data)){
     exact_match_data<-exact_match_data %>% st_drop_geometry()
   }
   cleaning_log1<-exact_match_data %>%
-    mutate(uuid= uuid,
+    mutate(uuid= !!sym(uuid_col),
            spotted=user,
            change_type="change_response",
            Sectors="Area_of_Knowledge",
@@ -14,7 +14,7 @@ exact_matches_to_cl<-function(exact_match_data,user="Jack"){
     select(uuid, spotted:issue)
 
   cleaning_log2<-exact_match_data %>%
-    mutate(uuid= uuid,
+    mutate(uuid= !!sym(uuid_col),
            spotted=user,
            change_type="change_response",
            Sectors="Area_of_Knowledge",
@@ -27,7 +27,7 @@ exact_matches_to_cl<-function(exact_match_data,user="Jack"){
   if(any(exact_match_data[["matched_where"]]=="shapefile_only")){
     wrong_county_data<-exact_match_data %>% filter(matched_where=="shapefile_only")
     cleaning_log3<-wrong_county_data %>%
-      mutate(uuid= uuid,
+      mutate(uuid= !!sym(uuid_col),
              spotted=user,
              change_type="change_response",
              Sectors="Area_of_Knowledge",
@@ -45,7 +45,7 @@ exact_matches_to_cl<-function(exact_match_data,user="Jack"){
 
 
 
-evaluate_unmatched_settlements<-function(user,new_settlement_table){
+evaluate_unmatched_settlements<-function(user,new_settlement_table, uuid_col){
   output<-list()
   new_settlement_table$action<-NA
 
@@ -58,7 +58,7 @@ evaluate_unmatched_settlements<-function(user,new_settlement_table){
   }
   cleaning_log1<-new_settlement_table %>%
     filter(action==1) %>%mutate(
-      uuid,
+      uuid=!!sym(uuid_col),
       spotted=user,
       change_type="change_response",
       Sectors="Area_of_Knowledge",
@@ -72,7 +72,7 @@ evaluate_unmatched_settlements<-function(user,new_settlement_table){
     select(uuid:suggested_new_value) #need to add uuid into selection on real data
   cleaning_log2<-new_settlement_table %>%
     filter(action==1) %>%mutate(
-      uuid,
+      uuid=!!sym(uuid_col),
       spotted=user,
       change_type="change_response",
       Sectors="Area_of_Knowledge",
